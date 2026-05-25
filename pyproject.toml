@@ -1,0 +1,74 @@
+# pyproject.toml
+[build-system]
+requires      = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name            = "MESA_DuneAgents"
+version         = "0.2.0"
+description     = "ABM of barchan dune fields — reimplementation of Robson & Baas (2023) in MESA with λ₂ heterogeneity extension"
+requires-python = ">=3.10,<3.13"
+
+# Direct dependencies only — transitive deps (Flask, Werkzeug, etc.)
+# are resolved automatically by pip.
+dependencies = [
+    "mesa>=3.3.1",
+    "numpy>=2.4.5",
+    "shapely>=2.1.2",
+    "pyarrow>=24.0.0",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+
+# Interactive visualization (Dash app)
+viz = [
+    "plotly>=6.1.0",
+    "dash>=4.1.0",
+    "matplotlib>=3.7",
+]
+
+# Jupyter notebooks
+notebooks = [
+    "ipykernel>=7.2.0",
+    "ipywidgets>=8.1.8",
+    "matplotlib>=3.7",
+]
+
+# Testing
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.0",
+]
+
+# Full install (development)
+all = [
+    "MESA_DuneAgents[viz,notebooks,dev]",
+]
+
+# ── Entry points ──────────────────────────────────────────────────────────────
+[project.scripts]
+dunas-app  = "visualization.app:main"
+dunas-grid = "scripts.run_grid:main"
+dunas-seed = "scripts.seed_summary:main"
+
+# ── Package discovery ─────────────────────────────────────────────────────────
+# package_dir hace que la raíz del proyecto sea el root de importación.
+# Tras `pip install -e .` todos los paquetes (src, visualization, scripts)
+# son importables desde cualquier notebook o script sin manipular sys.path.
+[tool.setuptools.package-dir]
+"" = "."
+
+[tool.setuptools.packages.find]
+where   = ["."]
+include = ["src*", "visualization*", "scripts*"]
+
+# ── pytest ────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths  = ["tests"]
+addopts    = "-v --tb=short"
+pythonpath = ["."]          # garantiza que la raíz esté en sys.path al correr tests
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]

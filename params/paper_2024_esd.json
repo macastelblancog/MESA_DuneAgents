@@ -1,0 +1,70 @@
+{
+  "_meta": {
+    "paper": "Robson & Baas (2024) ESD",
+    "doi": "10.5194/esurf-12-1205-2024",
+    "zenodo": "zenodo.13169266 (código v3)",
+    "description": "Parámetros para reproducir enjambres con distribución longitudinal homogénea. Figs. 2, 5 (outflux Duran, qshift=0.10), Fig. 3 (tipos de colisión), Fig. 10 (distribución log-normal). Requiere n_steps=2800 (~350 años) para alcanzar estado estable.",
+    "note_lambda3": "El paper 2024 §2.1 declara explícitamente lambda3=1/3 para que V_tot=W³_tot/40 con lambda1=1.0, lambda2=1.8. Este valor difiere del default del código (1/6). Con 1/3, los volúmenes son el doble que con 1/6, lo que afecta las tasas absolutas de flujo.",
+    "note_dt": "dt=0.125 años ≈ 45 días. Paper §2.5: 'la longitud del paso de tiempo fue fijada en δt=1/8 años ≈ 45 días'. Para 350 años: 2800 pasos. Para 200 años (estabilización): ~1600 pasos.",
+    "note_domain": "Dominio 10 km (largo) × 9 km (ancho total) con campo de inyección central de 3 km. Los 3 km laterales a cada lado son zonas vacías para permitir movimiento oblicuo.",
+    "note_rho0": "rho0=37 km⁻² = 3.7e-5 m⁻². Tasa de inyección (Ec. 8): N_enter = rho0 * v_mig(Weq) * fieldwidth * dt. Con los parámetros del paper: Weq ≈ 23 m, v_mig(23m) ≈ 219 m/yr, N_enter ≈ 3.7e-5 * 219 * 3000 * 0.125 ≈ 3 dunas/paso.",
+    "note_outflux": "outflux_mode='Duran' es el modo que produce homogeneidad longitudinal (Figs. 2, 5). Para reproducir Figs. 1, 4 (outflux no escalado), cambiar a 'Hersen' y qshift_ratio=0.15.",
+    "note_qshift": "qshift_ratio=0.10 produce estado estable con outflux='Duran'. Para barrido: variar en [0, 0.05, 0.10, 0.15]·qsat (Fig. 3). El paper reporta que entre 0.10 y 0.15 existe un punto óptimo donde merging=fragmentation pero 'fue imposible encontrarlo manualmente'.",
+    "note_weq": "W_eq = delta*qsat / (q0 - alpha*qsat) = 4.6*79 / (0.25*79 - 0.05*79) = 363.4/15.8 ≈ 23.0 m. Con inject_mode='weq' el modelo calcula este valor dinámicamente."
+  },
+  "geometry": {
+    "lambda1": 1.0,
+    "lambda2_mean": 1.8,
+    "lambda2_std": 0.0,
+    "lambda3": 0.3333333333333333,
+    "alpha": 0.05,
+    "delta": 4.6
+  },
+  "flux": {
+    "qsat": 79.0,
+    "q0ratio": 0.25,
+    "qshift_ratio": 0.10,
+    "outflux_mode": "Duran",
+    "a": 0.45,
+    "b": 1.0
+  },
+  "migration": {
+    "c": 45.0,
+    "w0": 16.6
+  },
+  "time": {
+    "dt": 0.125,
+    "n_steps": 2800
+  },
+  "domain": {
+    "simwidth": 9000.0,
+    "simlength": 10000.0,
+    "fieldwidth": 3000.0,
+    "fieldlength": 10000.0
+  },
+  "injection": {
+    "inject": true,
+    "inject_mode": "weq",
+    "rho0": 3.7e-05,
+    "w_inject_fixed": null
+  },
+  "wind": {
+    "regime": "unimodal",
+    "mean_deg": 270.0,
+    "std_deg": 3.0,
+    "secondary_deg": null,
+    "secondary_std_deg": null,
+    "secondary_weight": null
+  },
+  "initial_conditions": {
+    "n_dunes_init": 0,
+    "lw_init": [],
+    "rw_init": [],
+    "x_init": [],
+    "y_init": []
+  },
+  "model": {
+    "collisions": true,
+    "seed": 42
+  }
+}

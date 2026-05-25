@@ -1,0 +1,68 @@
+{
+  "_meta": {
+    "paper": "Robson & Baas (2023) GRL",
+    "doi": "10.1029/2023GL105182",
+    "zenodo": "zenodo.7692843 (código v1)",
+    "description": "Parámetros para verificar tipos de colisión individuales: merging, exchange, fragmentation. NO requiere dominio grande ni simulaciones largas. Usar con n_dunes_init=2–4 dunas y n_steps=500.",
+    "note_lambda3": "El código v1 usa lambda3=1/6 (default). El paper 2024 aclara que lambda3=1/3 produce V_tot=W³/40 con lambda1=1, lambda2=1.8. Para reproducir el comportamiento EXACTO del código v1 original, usar 1/6 aquí. La dinámica relativa es idéntica.",
+    "note_lambda1": "Bug B-01 corregido: la función gamma_c ahora incluye lambda1 explícitamente. Los autores usaban lambda1=1 efectivamente (sin bug visible con lambda1=1), por lo que lambda1=1.0 reproduce los resultados del paper.",
+    "note_c_w0": "c=45 y w0=16.6 aparecen en la fórmula de migración del paper (Elbelrhiti 2008). El ExampleRunFile.py del repositorio usa c=50 y w0=0 como defaults genéricos. Para reproducción científica fiel, usar c=45 y w0=16.6.",
+    "note_outflux": "Paper 2023 usa modo 'Hersen' (outflux no escalado = qsat constante). El modo 'Duran' fue introducido como comparación en el paper 2024.",
+    "note_dt": "dt=0.001 años (≈9 horas) es suficiente para simular colisiones individuales. Para enjambres de largo plazo usar el preset 2024 con dt=0.125."
+  },
+  "geometry": {
+    "lambda1": 1.0,
+    "lambda2_mean": 1.8,
+    "lambda2_std": 0.0,
+    "lambda3": 0.16666666666666666,
+    "alpha": 0.05,
+    "delta": 4.6
+  },
+  "flux": {
+    "qsat": 79.0,
+    "q0ratio": 0.25,
+    "qshift_ratio": 0.10,
+    "outflux_mode": "Hersen",
+    "a": 0.45,
+    "b": 1.0
+  },
+  "migration": {
+    "c": 45.0,
+    "w0": 16.6
+  },
+  "time": {
+    "dt": 0.001,
+    "n_steps": 500
+  },
+  "domain": {
+    "simwidth": 600.0,
+    "simlength": 600.0,
+    "fieldwidth": 200.0,
+    "fieldlength": 200.0
+  },
+  "injection": {
+    "inject": false,
+    "inject_mode": "wmin",
+    "rho0": 0.0,
+    "w_inject_fixed": null
+  },
+  "wind": {
+    "regime": "unimodal",
+    "mean_deg": 270.0,
+    "std_deg": 0.0,
+    "secondary_deg": null,
+    "secondary_std_deg": null,
+    "secondary_weight": null
+  },
+  "initial_conditions": {
+    "n_dunes_init": 3,
+    "lw_init": [20.0, 15.4, 12.0],
+    "rw_init": [20.0, 15.4, 12.0],
+    "x_init": [100.0, 130.0, 95.0],
+    "y_init": [580.0, 560.0, 540.0]
+  },
+  "model": {
+    "collisions": true,
+    "seed": 42
+  }
+}

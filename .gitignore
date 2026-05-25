@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+scripts/
+
+
+# Resultados de simulación (pesados)
+resultados/runs/
+resultados/summary.parquet
+resultados/run_index.csv
+
+# Notebooks — outputs
+notebooks/*.nbconvert.*
+.ipynb_checkpoints/
+
+# Entornos
+.venv/
+env/
