@@ -1,5 +1,5 @@
 """
-visualizacion/stored_results/layout.py
+visualization/stored_results/layout.py
 Pestaña de resultados almacenados — lee parquet, no ejecuta MESA.
 
 Dos paneles
@@ -19,7 +19,7 @@ from pathlib import Path
 import pandas as pd
 from dash import dcc, html, Input, Output, State, no_update
 
-from visualizacion.shared.callbacks import (
+from visualization.shared.callbacks import (
     load_summary, load_run, get_steps, agents_at_step,
     make_field_figure, make_timeseries_figure,
     make_histogram_figure, make_heatmap_figure, make_parallel_figure,
@@ -483,7 +483,7 @@ def register_callbacks(app):
         next_step = min(current_step + max(1, int(speed or 1)), max_step)
         return next_step, no_update, no_update, no_update
 
-    # 5. Actualizar visualizaciones al cambiar el paso
+    # 5. Actualizar visualizationes al cambiar el paso
     @app.callback(
         Output("sr-field",      "figure"),
         Output("sr-histogram",  "figure"),

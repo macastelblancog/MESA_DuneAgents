@@ -28,6 +28,8 @@ from __future__ import annotations
 import math
 import numpy as np
 import mesa
+from mesa.space import ContinuousSpace
+from mesa.datacollection import DataCollector
 from pathlib import Path
 from typing import Any
 
@@ -138,11 +140,9 @@ class DuneSwarm(mesa.Model):
         # NOTA: borde barlovento siempre = simlength (inyección)
 
         # ── Espacio continuo ───────────────────────────────────────────────────
-        self.space = mesa.spaces.ContinuousSpace(
-            x_min=0.0, x_max=simwidth,
-            y_min=-1.0,               # permite un paso extra antes de eliminar
-            y_max=simlength + 1.0,
-            torus=False,
+        # Mesa 3.x: ContinuousSpace(x_max, y_max, torus, x_min=0, y_min=0)
+        self.space = ContinuousSpace(
+            simwidth, simlength + 1.0, False, x_min=0.0, y_min=-1.0
         )
 
         # ── Inyección ──────────────────────────────────────────────────────────
@@ -182,7 +182,7 @@ class DuneSwarm(mesa.Model):
         self.fragmentation_this_step: int = 0
 
         # ── DataCollector ──────────────────────────────────────────────────────
-        self.datacollector = mesa.DataCollector(
+        self.datacollector = DataCollector(
             model_reporters={
                 'step':                   'current_step',
                 'N_dunes':                lambda m: len(list(m.agents)),

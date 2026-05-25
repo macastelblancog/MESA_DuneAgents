@@ -1,5 +1,5 @@
 """
-visualizacion/app.py
+visualization/app.py
 Aplicación Dash unificada del ABM de dunas barchán.
 
 Pestañas
@@ -10,8 +10,8 @@ Pestañas
 Uso
 ---
     cd proyecto_dunas_mesa
-    python visualizacion/app.py
-    python visualizacion/app.py --data resultados/ --port 8050
+    python visualization/app.py
+    python visualization/app.py --data resultados/ --port 8050
 """
 
 import argparse
@@ -24,15 +24,15 @@ sys.path.insert(0, str(ROOT))
 import dash
 from dash import dcc, html, Input, Output
 
-from visualizacion.stored_results.layout import (
+from visualization.stored_results.layout import (
     layout as stored_layout,
     register_callbacks as stored_callbacks,
 )
-from visualizacion.real_time.layout import (
+from visualization.real_time.layout import (
     layout as realtime_layout,
     register_callbacks as realtime_callbacks,
 )
-from visualizacion.shared.callbacks import C
+from visualization.shared.callbacks import C
 
 # ── App ───────────────────────────────────────────────────────────────────────
 

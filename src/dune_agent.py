@@ -41,7 +41,7 @@ class DuneAgent(mesa.Agent):
 
     def __init__(self, model: "DuneSwarm", lw: float, rw: float,
                  lambda2: float | None = None):
-        super().__init__(model)   # MESA 2.x: registra unique_id y model ✓
+        super().__init__(model)
         self.lw = float(lw)
         self.rw = float(rw)
         self.lambda2 = self._init_lambda2(lambda2)

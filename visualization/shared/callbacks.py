@@ -32,6 +32,7 @@ try:
 except ImportError:
     _SHAPELY = False
 
+print(_SHAPELY)
 # ── Constantes compartidas ────────────────────────────────────────────────────
 
 METRIC_LABELS = {
@@ -141,14 +142,17 @@ def agents_at_step(agent_df: pd.DataFrame, step: int) -> pd.DataFrame:
 
 
 def estimate_wind_vec(wind_regime: str) -> tuple[float, float]:
-    """Estima vector de viento dominante desde el nombre del régimen."""
+    """Estima vector de viento dominante desde el nombre del régimen.
+    Convención del modelo: viento primario = −y = (0, −1).
+    """
     vectors = {
-        "unimodal":          (0.0,  1.0),
-        "bimodal_acute":     (0.5,  0.866),
-        "bimodal_obtuse":    (0.707, 0.707),
-        "multidirectional":  (0.0,  1.0),
+        "unimodal":          ( 0.0,  -1.0),
+        "bimodal_acute":     (-0.383, -0.924),
+        "bimodal_moderate":  (-0.707, -0.707),
+        "bimodal_obtuse":    (-0.924, -0.383),
+        "multidirectional":  ( 0.0,  -1.0),
     }
-    return vectors.get(wind_regime, (0.0, 1.0))
+    return vectors.get(wind_regime, (0.0, -1.0))
 
 
 # ── 2. Geometría de polígonos para Plotly ────────────────────────────────────
@@ -164,6 +168,17 @@ def _flank_world_coords(
 ) -> tuple[list, list] | None:
     """
     Calcula coordenadas mundo del polígono de un flanco, orientado al viento.
+
+    Geometría canónica (TOE en el origen, duna apunta en +y):
+        El polígono se construye con el TOE en (0,0) y el cuerno hacia +y.
+        Luego se rota al ángulo real del viento y se traslada a (x, y).
+
+    Para viento en −y (convención del modelo, wind_vec=(0,−1)):
+        rotation = arctan2(−1,0) − 90° = −90° − 90° = −180°
+        → el cuerno queda en −y (sotavento) ✓
+        → lw (canonical en −x) queda en +x  ✓
+        → rw (canonical en +x) queda en −x  ✓
+
     scale > 1 agranda el polígono visualmente manteniendo su posición real.
     """
     if not _SHAPELY:
@@ -171,31 +186,30 @@ def _flank_world_coords(
 
     lw_s = lw * scale
     rw_s = rw * scale
-    L_b = lambda1 * (lw_s + rw_s)
-    if side == 'left':
-        w   = lw_s
-        H   = min(alpha * lw_s + delta / 2.0 * scale, lw_s * (1.0 - 1e-9))
-        L_h = lambda2 * lw_s
-        pts = [
-            (0,        -L_b / 2),
-            (-w,       -L_b / 2),
-            (-w,        L_b / 2 + L_h),
-            (-w + H,    L_b / 2 + L_h),
-            (-w + H,    L_b / 2),
-            (0,         L_b / 2),
-        ]
-    else:
-        w   = rw_s
-        H   = min(alpha * rw_s + delta / 2.0 * scale, rw_s * (1.0 - 1e-9))
-        L_h = lambda2 * rw_s
-        pts = [
-            (0,       -L_b / 2),
-            (w,       -L_b / 2),
-            (w,        L_b / 2 + L_h),
-            (w - H,    L_b / 2 + L_h),
-            (w - H,    L_b / 2),
-            (0,        L_b / 2),
-        ]
+    w    = lw_s if side == "left" else rw_s
+    sign = -1   if side == "left" else +1   # left → −x, right → +x en canónico
+
+    if w <= 0:
+        return None
+
+    # Distancias downwind desde el toe (en sistema canónico, +y = downwind)
+    d_wide = lambda1 * (lw_s + rw_s) / 2.0   # distancia al punto más ancho
+    d_horn = lambda2 * w                       # distancia al cuerno
+
+    # Ancho del cuerno, mínimo 1 m para que se vea
+    H = max(1.0, alpha * w + delta / 2.0 * scale)
+    H = min(H, w * 0.95)                      # no más ancho que el flanco
+
+    # Polígono de media luna: 5 vértices + cierre
+    # Toe en (0,0), cuerno en (sign*w→sign*H, d_horn)
+    pts = [
+        (0,           0),           # toe (compartido con el otro flanco)
+        (sign * w * 0.6, d_wide * 0.3),  # curva media externa
+        (sign * w,    d_wide),      # punto más ancho
+        (sign * w,    d_horn),      # base del cuerno (lateral)
+        (sign * H,    d_horn),      # punta del cuerno
+        (0,           d_horn * 0.5),# borde interno (eje de la duna)
+    ]
 
     poly = Polygon(pts)
 
@@ -207,10 +221,9 @@ def _flank_world_coords(
     poly = shapely_translate(poly, x, y)
 
     coords = np.array(poly.exterior.coords)
-    # Cerrar el polígono repitiendo el primer punto
-    xs = coords[:, 0].tolist() + [coords[0, 0]]
-    ys = coords[:, 1].tolist() + [coords[0, 1]]
-    return xs, ys
+    xs_out = coords[:, 0].tolist() + [coords[0, 0]]
+    ys_out = coords[:, 1].tolist() + [coords[0, 1]]
+    return xs_out, ys_out
 
 
 # ── 3. Figura del campo de dunas ──────────────────────────────────────────────
@@ -267,24 +280,20 @@ def make_field_figure(
                            showarrow=False, font=dict(color=C["muted"]))
         return fig
 
-    # ── Colormap según variable ───────────────────────────────────────────────
-    def get_color(row):
-        if color_by == "morphotype":
-            return MORPHOTYPE_COLORS.get(row.get("morphotype", "barchan"), "#A0AEC0")
-        if color_by == "lambda2":
-            norm = (row.get("lambda2", 2.5) - 1.2) / (4.5 - 1.2)
-            r = int(255 * min(1, max(0, 2 * norm)))
-            b = int(255 * min(1, max(0, 2 * (1 - norm))))
-            return f"rgba({r},100,{b},0.75)"
-        if color_by == "asymmetry":
-            norm = min(1, row.get("asymmetry", 0) / 0.6)
-            g = int(200 * (1 - norm))
-            return f"rgba(200,{g},60,0.75)"
-        # width
-        return C["accent"]
+    # ── Colores fijos: lw (flanco izquierdo) = azul, rw (derecho) = rojo ───────
+    # Igual que en Robson & Baas (2023/2024): flancos en colores distintos
+    # sin importar morfotipo (la info de morfotipo va en el hover).
+    COLOR_LW_FILL   = "rgba(59,130,246,0.75)"   # azul
+    COLOR_LW_LINE   = "rgba(29,78,216,0.90)"
+    COLOR_RW_FILL   = "rgba(239,68,68,0.75)"    # rojo
+    COLOR_RW_LINE   = "rgba(185,28,28,0.90)"
 
-    # ── Dibujar: polígonos (shapely) o scatter (fallback) ────────────────────
-    added_morphotypes = set()
+    # ── Batch: acumular todos los polígonos en 2 trazas (None como separador) ─
+    # Esto reemplaza el loop que creaba 2*N trazas → sin lag con N>100 dunas.
+    lw_xs, lw_ys = [], []   # todos los flancos izquierdos
+    rw_xs, rw_ys = [], []   # todos los flancos derechos
+    # Hover: scatter invisible en posición del toe
+    hover_x, hover_y, hover_txt = [], [], []
 
     for _, row in agent_step.iterrows():
         x   = float(row.get("pos_x", 0))
@@ -295,47 +304,80 @@ def make_field_figure(
         morph = str(row.get("morphotype", "barchan"))
         asym  = float(row.get("asymmetry", 0))
         w     = lw + rw
-        color = get_color(row)
-        hover = (f"<b>{morph}</b><br>"
-                 f"W={w:.1f}m  lw={lw:.1f} rw={rw:.1f}<br>"
-                 f"λ₂={l2:.2f}  asim={asym:.3f}")
 
-        show_legend = (color_by == "morphotype" and morph not in added_morphotypes)
-        if show_legend:
-            added_morphotypes.add(morph)
+        hover_x.append(x)
+        hover_y.append(y)
+        hover_txt.append(
+            f"<b>{morph}</b><br>"
+            f"W={w:.1f} m  lw={lw:.1f}  rw={rw:.1f}<br>"
+            f"λ₂={l2:.2f}  asim={asym:.3f}<br>"
+            f"pos=({x:.0f}, {y:.0f})")
 
         if _SHAPELY:
-            for side in ("left", "right"):
+            for side, buf_x, buf_y in (
+                ("left",  lw_xs, lw_ys),
+                ("right", rw_xs, rw_ys),
+            ):
                 coords = _flank_world_coords(
                     x, y, lw, rw, lambda1, l2, alpha, delta, wind_vec, side,
                     scale=scale,
                 )
                 if coords is None:
                     continue
-                xs, ys = coords
-                fig.add_trace(go.Scatter(
-                    x=xs, y=ys,
-                    mode="lines",
-                    fill="toself",
-                    fillcolor=color,
-                    line=dict(color="white", width=0.6),
-                    showlegend=(show_legend and side == "left"),
-                    legendgroup=morph,
-                    name=morph,
-                    hovertemplate=hover + "<extra></extra>",
-                ))
-                show_legend = False   # solo una entrada por agente
+                px, py = coords
+                buf_x.extend(px + [None])
+                buf_y.extend(py + [None])
         else:
+            # Sin shapely: scatter de puntos con tamaño proporcional al ancho
+            lw_xs.append(x - lw * scale * 0.3)
+            lw_ys.append(y)
+            rw_xs.append(x + rw * scale * 0.3)
+            rw_ys.append(y)
+
+    # ── Añadir las 2 trazas batch ─────────────────────────────────────────────
+    if _SHAPELY:
+        if lw_xs:
             fig.add_trace(go.Scatter(
-                x=[x], y=[y],
-                mode="markers",
-                marker=dict(size=max(6, w * 1.5), color=color,
-                            line=dict(color="white", width=0.5)),
-                showlegend=show_legend,
-                legendgroup=morph,
-                name=morph,
-                hovertemplate=hover + "<extra></extra>",
+                x=lw_xs, y=lw_ys,
+                mode="lines", fill="toself",
+                fillcolor=COLOR_LW_FILL,
+                line=dict(color=COLOR_LW_LINE, width=0.6),
+                name="Flanco izq (lw)", showlegend=True,
+                hoverinfo="skip",
             ))
+        if rw_xs:
+            fig.add_trace(go.Scatter(
+                x=rw_xs, y=rw_ys,
+                mode="lines", fill="toself",
+                fillcolor=COLOR_RW_FILL,
+                line=dict(color=COLOR_RW_LINE, width=0.6),
+                name="Flanco der (rw)", showlegend=True,
+                hoverinfo="skip",
+            ))
+    else:
+        # Fallback scatter
+        fig.add_trace(go.Scatter(
+            x=lw_xs, y=lw_ys, mode="markers",
+            marker=dict(size=8, color=COLOR_LW_FILL),
+            name="Flanco izq (lw)", showlegend=True, hoverinfo="skip",
+        ))
+        fig.add_trace(go.Scatter(
+            x=rw_xs, y=rw_ys, mode="markers",
+            marker=dict(size=8, color=COLOR_RW_FILL),
+            name="Flanco der (rw)", showlegend=True, hoverinfo="skip",
+        ))
+
+    # Hover invisible sobre los toes (info por duna sin coste de trazas)
+    if hover_x:
+        fig.add_trace(go.Scatter(
+            x=hover_x, y=hover_y,
+            mode="markers",
+            marker=dict(size=max(6 * scale, 4), color="rgba(0,0,0,0)",
+                        line=dict(width=0)),
+            showlegend=False,
+            hovertemplate="%{text}<extra></extra>",
+            text=hover_txt,
+        ))
 
     # ── Flecha de dirección del viento ────────────────────────────────────────
     wx, wy   = wind_vec

@@ -1,5 +1,5 @@
 """
-visualizacion/real_time/layout.py
+visualization/real_time/layout.py
 Pestaña de simulación en tiempo real — stub.
 
 Pendiente de implementar cuando DuneSwarm.step() esté completamente
@@ -8,7 +8,7 @@ avanza el modelo un paso por tick y actualiza sr-field via dcc.Store.
 """
 
 from dash import dcc, html
-from visualizacion.shared.callbacks import C
+from visualization.shared.callbacks import C
 
 
 def layout() -> html.Div:

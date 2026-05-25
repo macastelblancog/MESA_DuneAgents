@@ -56,7 +56,7 @@ def gamma_c(
 
     # ── Primer umbral: por flujo lateral (Ec. 4) ──────────────────────────────
     denom = lambda2 * qshift_ratio - alpha
-    if denom <= 0.0:
+    if denom <= 0.0 or w_min <= 0.0:
         # qshift demasiado pequeño para estabilizar — solo limitado geométricamente
         return gc_lambda
 

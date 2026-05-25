@@ -106,7 +106,7 @@ class WindRegime:
         self.std_deg = std_deg
         self.secondary_deg = secondary_deg if secondary_deg is not None else mean_deg + 22.5
         self.secondary_std_deg = secondary_std_deg if secondary_std_deg is not None else std_deg
-        self.secondary_weight = float(secondary_weight)
+        self.secondary_weight = float(secondary_weight) if secondary_weight is not None else 0.25  # null en JSON unimodal
         self._rng = rng if rng is not None else np.random.default_rng()
 
     def sample(self) -> tuple[float, float]:
