@@ -136,7 +136,8 @@ class DuneAgent(mesa.Agent):
         new_y = y + dy
         # C-02 FIX: solo eliminar en y < 0 (sotavento) o x fuera del dominio
         # NO eliminar en y > simlength (ese es el borde de inyección barlovento)
-        if (new_x < 0 or new_x > self.model.simwidth or new_y < 0):
+        if (new_x < 0 or new_x > self.model.simwidth 
+            or new_y < 0 or new_y > self.model.simlength):
             self.model.remove_agent(self)
         else:
             self.model.space.move_agent(self, (new_x, new_y))
