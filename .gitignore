@@ -6,7 +6,6 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-scripts/
 resultados/
 
 # Resultados de simulación (pesados)
@@ -21,3 +20,6 @@ notebooks/*.nbconvert.*
 # Entornos
 .venv/
 env/
+
+dump*
+figures/*.html
