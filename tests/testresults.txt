@@ -1,0 +1,63 @@
+============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\mange\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\python.exe
+cachedir: .pytest_cache
+rootdir: C:\GITHUB_REPOSITORIES_LOCAL\MESA_DuneAgents
+configfile: pyproject.toml
+plugins: anyio-4.12.1, dash-3.2.0
+collecting ... collected 49 items
+
+tests/test_bayesian.py::test_bayesian_grid_reduces_combinations XFAIL    [  2%]
+tests/test_bayesian.py::test_posterior_updates_correctly XFAIL (M1
+pendiente)                                                               [  4%]
+tests/test_bayesian.py::test_regime_inference_recovers_unimodal XFAIL    [  6%]
+tests/test_bayesian.py::test_compatibility_fn_returns_in_range XFAIL (M2
+pendiente)                                                               [  8%]
+tests/test_bayesian.py::test_m3_agent_updates_belief XFAIL (M3
+(dune_agent bayesian mode) pendiente)                                    [ 10%]
+tests/test_bayesian.py::test_m3_incompatible_with_std XFAIL (M3
+pendiente)                                                               [ 12%]
+tests/test_dune_agent.py::TestScalarEquations::test_flank_volume_positive PASSED [ 14%]
+tests/test_dune_agent.py::TestScalarEquations::test_flank_volume_scales_cubic PASSED [ 16%]
+tests/test_dune_agent.py::TestScalarEquations::test_width_from_volume_roundtrip PASSED [ 18%]
+tests/test_dune_agent.py::TestScalarEquations::test_width_from_volume_zero PASSED [ 20%]
+tests/test_dune_agent.py::TestScalarEquations::test_migration_rate_decreases_with_width PASSED [ 22%]
+tests/test_dune_agent.py::TestScalarEquations::test_horn_width_ec1 PASSED [ 24%]
+tests/test_dune_agent.py::TestGammaC::test_gamma_c_greater_than_one PASSED [ 26%]
+tests/test_dune_agent.py::TestGammaC::test_gamma_c_decreases_with_width PASSED [ 28%]
+tests/test_dune_agent.py::TestGammaC::test_gamma_c_differs_from_buggy_original PASSED [ 30%]
+tests/test_dune_agent.py::TestWindRegime::test_unimodal_vector_is_unit PASSED [ 32%]
+tests/test_dune_agent.py::TestWindRegime::test_get_angle_inverse_of_get_vector PASSED [ 34%]
+tests/test_dune_agent.py::TestWindRegime::test_unknown_regime_raises PASSED [ 36%]
+tests/test_dune_agent.py::TestWindRegime::test_all_regimes_produce_unit_vectors PASSED [ 38%]
+tests/test_dune_agent.py::TestDuneAgent::test_init_symmetric PASSED      [ 40%]
+tests/test_dune_agent.py::TestDuneAgent::test_morphotype_symmetric_small_is_barchan PASSED [ 42%]
+tests/test_dune_agent.py::TestDuneAgent::test_lambda2_clamp PASSED       [ 44%]
+tests/test_dune_agent.py::TestDuneAgent::test_lambda2_drawn_from_distribution PASSED [ 46%]
+tests/test_dune_agent.py::TestDuneAgent::test_lambda2_uniform_when_std_zero PASSED [ 48%]
+tests/test_dune_agent.py::TestDuneAgent::test_volume_positive PASSED     [ 51%]
+tests/test_dune_agent.py::TestDuneAgent::test_width_property PASSED      [ 53%]
+tests/test_dune_agent.py::TestDuneAgent::test_receive_flux_accumulates PASSED [ 55%]
+tests/test_dune_agent.py::TestDuneAgent::test_reset_fluxes PASSED        [ 57%]
+tests/test_dune_agent.py::TestDuneSwarmInit::test_n_agents_after_init PASSED [ 59%]
+tests/test_dune_agent.py::TestDuneSwarmInit::test_w_min_formula PASSED   [ 61%]
+tests/test_dune_agent.py::TestDuneSwarmInit::test_agents_within_bounds PASSED [ 63%]
+tests/test_dune_agent.py::TestDuneSwarmInit::test_reproducibility PASSED [ 65%]
+tests/test_dune_agent.py::TestDuneSwarmInit::test_key_params_exist_as_attributes PASSED [ 67%]
+tests/test_dune_agent.py::TestDuneSwarmInit::test_params_roundtrip PASSED [ 69%]
+tests/test_smoke.py::test_imports PASSED                                 [ 71%]
+tests/test_smoke.py::test_gamma_c_basic PASSED                           [ 73%]
+tests/test_smoke.py::test_gamma_c_degenerate PASSED                      [ 75%]
+tests/test_smoke.py::test_volume_roundtrip PASSED                        [ 77%]
+tests/test_smoke.py::test_migration_rate_positive PASSED                 [ 79%]
+tests/test_smoke.py::test_migration_rate_zero_width PASSED               [ 81%]
+tests/test_smoke.py::test_wind_regimes_all_valid PASSED                  [ 83%]
+tests/test_smoke.py::test_wind_regime_unknown PASSED                     [ 85%]
+tests/test_smoke.py::test_dune_agent_properties PASSED                   [ 87%]
+tests/test_smoke.py::test_dune_agent_lambda2_fixed PASSED                [ 89%]
+tests/test_smoke.py::test_dune_agent_lambda2_stochastic PASSED           [ 91%]
+tests/test_smoke.py::test_swarm_init PASSED                              [ 93%]
+tests/test_smoke.py::test_swarm_step_runs PASSED                         [ 95%]
+tests/test_smoke.py::test_swarm_datacollector PASSED                     [ 97%]
+tests/test_smoke.py::test_swarm_params_roundtrip PASSED                  [100%]
+
+======================== 43 passed, 6 xfailed in 3.53s ========================

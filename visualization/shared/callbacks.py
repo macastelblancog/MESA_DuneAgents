@@ -20,7 +20,14 @@ Notas importantes
   distorsiones visuales y mantener escala métrica consistente.
 """
 
+import functools
+import gzip
 import json
+import os
+import pickle
+import tempfile
+import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +46,91 @@ except ImportError:
     _SHAPELY = False
 
 
+# ── Cache en disco ────────────────────────────────────────────────────────────
+# Evita recargar agent_data + model_data desde SQLite en cada tick del slider.
+# Cada corrida se serializa a /tmp/dunas_cache/<run_id>.pkl.gz la primera vez.
+# LRU de 5 entradas en memoria para acceso instantáneo dentro de la misma sesión.
+
+_CACHE_DIR = Path(tempfile.gettempdir()) / "dunas_cache"
+_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+_MEM_CACHE: dict = {}          # run_id → run_data
+_MEM_CACHE_ORDER: list = []    # LRU: más reciente al final
+_MEM_CACHE_MAX = 5
+_CACHE_LOCK = threading.Lock()
+
+
+def _cache_path(run_id: str) -> Path:
+    return _CACHE_DIR / f"{run_id}.pkl.gz"
+
+
+def _mem_get(run_id: str):
+    with _CACHE_LOCK:
+        if run_id in _MEM_CACHE:
+            # mover al final (más reciente)
+            _MEM_CACHE_ORDER.remove(run_id)
+            _MEM_CACHE_ORDER.append(run_id)
+            return _MEM_CACHE[run_id]
+    return None
+
+
+def _mem_put(run_id: str, data: dict) -> None:
+    with _CACHE_LOCK:
+        if run_id not in _MEM_CACHE:
+            if len(_MEM_CACHE_ORDER) >= _MEM_CACHE_MAX:
+                evict = _MEM_CACHE_ORDER.pop(0)
+                _MEM_CACHE.pop(evict, None)
+            _MEM_CACHE_ORDER.append(run_id)
+        _MEM_CACHE[run_id] = data
+
+
+def load_run_cached(data_dir: Path, run_id: str) -> dict:
+    """
+    Carga una corrida con cache en dos niveles:
+      1. Memoria (LRU de 5) — acceso en microsegundos.
+      2. Disco (/tmp/dunas_cache/) — acceso en ~50 ms vs ~4 s de SQLite.
+      3. SQLite — solo en la primera carga.
+    """
+    # Nivel 1: memoria
+    cached = _mem_get(run_id)
+    if cached is not None:
+        return cached
+
+    # Nivel 2: disco
+    cp = _cache_path(run_id)
+    if cp.exists():
+        try:
+            with gzip.open(cp, "rb") as f:
+                data = pickle.load(f)
+            _mem_put(run_id, data)
+            return data
+        except Exception:
+            cp.unlink(missing_ok=True)  # corrupto — regenerar
+
+    # Nivel 3: SQLite (lento, solo primera vez)
+    data = load_run(data_dir, run_id)
+
+    # Guardar en disco en background para no bloquear la UI
+    def _write():
+        try:
+            with gzip.open(cp, "wb", compresslevel=3) as f:
+                pickle.dump(data, f)
+        except Exception:
+            pass
+
+    threading.Thread(target=_write, daemon=True).start()
+    _mem_put(run_id, data)
+    return data
+
+
+def invalidate_cache(run_id: str) -> None:
+    """Invalida cache de una corrida (útil si se regeneran datos)."""
+    with _CACHE_LOCK:
+        _MEM_CACHE.pop(run_id, None)
+        if run_id in _MEM_CACHE_ORDER:
+            _MEM_CACHE_ORDER.remove(run_id)
+    _cache_path(run_id).unlink(missing_ok=True)
+
+
 # ── Constantes compartidas ────────────────────────────────────────────────────
 
 METRIC_LABELS = {
@@ -50,6 +142,9 @@ METRIC_LABELS = {
     "p90_width_final":      "P90 ancho (m)",
     "calving_count":        "Calveos totales",
     "collision_count":      "Colisiones totales",
+    "merging_count":        "Fusiones totales",
+    "exchange_count":       "Intercambios totales",
+    "fragmentation_count":  "Fragmentaciones totales",
 }
 
 PARAM_LABELS = {
@@ -59,7 +154,10 @@ PARAM_LABELS = {
     "lambda2_std":  "λ₂ σ heterogeneidad",
     "lambda2_mean": "λ₂ media",
     "n_dunes_init": "N dunas iniciales",
+    "outflux_mode": "Modo outflux",
 }
+
+ALL_OUTFLUX_MODES = ["Hersen", "Duran"]
 
 ALL_REGIMES = [
     "unimodal",
@@ -112,42 +210,22 @@ def load_summary(data_dir: Path) -> pd.DataFrame:
                 continue
     return pd.DataFrame()
 
-
-def load_run(data_dir: Path, run_id: str) -> dict:
+def load_run(data_dir, run_id: str) -> dict:
     """
     Carga params, model_data y agent_data de una corrida.
-
-    Retorna
-    -------
-    dict:
-        params : dict
-        model  : pd.DataFrame
-        agents : pd.DataFrame
+ 
+    Detecta automáticamente SQLite (dunas.db) o directorios (runs/{run_id}/).
+    La detección ocurre dentro de RunStorage.load_run() — callbacks.py
+    no necesita saber qué backend está en uso.
     """
-    run_dir = data_dir / "runs" / run_id
-
-    params = {}
-    params_path = run_dir / "params.json"
-    if params_path.exists():
-        with open(params_path, encoding="utf-8") as f:
-            params = json.load(f)
-
-    model_df = pd.DataFrame()
-    model_path = run_dir / "model_data.parquet"
-    if model_path.exists():
-        model_df = pd.read_parquet(model_path)
-
-    agent_df = pd.DataFrame()
-    agent_path = run_dir / "agent_data.parquet"
-    if agent_path.exists():
-        agent_df = pd.read_parquet(agent_path)
-
-    return {
-        "params": params,
-        "model": model_df,
-        "agents": agent_df,
-    }
-
+    from pathlib import Path
+    from scripts.run_storage import RunStorage
+ 
+    try:
+        return RunStorage.load_run(Path(data_dir), run_id)
+    except Exception:
+        return {"params": {}, "model": __import__("pandas").DataFrame(),
+                "agents": __import__("pandas").DataFrame()}
 
 def get_steps(agent_df: pd.DataFrame) -> list[int]:
     """Retorna lista ordenada de pasos disponibles en agent_data."""
@@ -527,6 +605,7 @@ def make_field_figure(
         uirevision=uirevision_key or "default",
         xaxis=dict(
             range=x_range,
+            autorange=False,
             showgrid=False,
             zeroline=False,
             title="x (m)",
@@ -534,6 +613,7 @@ def make_field_figure(
         ),
         yaxis=dict(
             range=y_range,
+            autorange=False,
             showgrid=False,
             zeroline=False,
             title="y (m)",
@@ -752,53 +832,98 @@ def _render_colorby_mode(
     params=None,
 ):
     """
-    Modo atributo: grupos por color × 2 flancos.
+    Modo atributo: grupos por color x 2 flancos.
+
+    Para color_by="morphotype": siempre emite las 4 trazas en el mismo orden
+    fijo (barchan, transverse, asymmetric, pre_calving), con lista vacia si
+    no hay agentes de ese tipo. Esto evita que la leyenda salte al des-seleccionar.
+
+    Para color_by continuo (lambda2, asymmetry, width): agrupa por bin de color,
+    orden de aparicion — no tiene categorias fijas, es aceptable.
     """
     params = params or {}
 
-    colors = _assign_agent_colors(agent_step, color_by)
+    if color_by == "morphotype":
+        # Orden fijo de categorias — NUNCA cambia entre pasos
+        MORPH_ORDER = ["barchan", "transverse", "asymmetric", "pre_calving"]
+        buffers = {m: {"lw_xs": [], "lw_ys": [], "rw_xs": [], "rw_ys": []}
+                   for m in MORPH_ORDER}
 
+        for _, row in agent_step.iterrows():
+            morph = str(row.get("morphotype", "barchan"))
+            if morph not in buffers:
+                morph = "barchan"
+            buf = buffers[morph]
+            x  = float(row.get("pos_x", 0))
+            y  = float(row.get("pos_y", 0))
+            lw = float(row.get("lw", 5))
+            rw = float(row.get("rw", 5))
+            l2 = float(row.get("lambda2", params.get("lambda2_mean", 1.8)))
+            if _SHAPELY:
+                for side, bx_k, by_k in (
+                    ("left",  "lw_xs", "lw_ys"),
+                    ("right", "rw_xs", "rw_ys"),
+                ):
+                    coords = _flank_world_coords(x=x, y=y, lw=lw, rw=rw,
+                        lambda1=lambda1, lambda2=l2, alpha=alpha, delta=delta,
+                        wind_vec=wind_vec, side=side, scale=scale)
+                    if coords:
+                        buf[bx_k].extend(coords[0] + [None])
+                        buf[by_k].extend(coords[1] + [None])
+            else:
+                buf["lw_xs"].append(x - lw * scale * 0.3)
+                buf["lw_ys"].append(y)
+                buf["rw_xs"].append(x + rw * scale * 0.3)
+                buf["rw_ys"].append(y)
+
+        # Emitir SIEMPRE en el mismo orden — lista vacia si no hay agentes del tipo
+        for morph in MORPH_ORDER:
+            buf   = buffers[morph]
+            color = MORPHOTYPE_COLORS.get(morph, MORPHOTYPE_COLORS["ghost"])
+            fill  = _add_alpha_to_color(color, 0.72)
+            line  = _add_alpha_to_color(color, 0.95)
+            for side_name, xs_k, ys_k, show_leg in (
+                ("lw", "lw_xs", "lw_ys", True),
+                ("rw", "rw_xs", "rw_ys", False),
+            ):
+                # Siempre añadir la traza — vacia si no hay agentes
+                # Esto mantiene estable el indice de leyenda entre pasos
+                fig.add_trace(go.Scatter(
+                    x=buf[xs_k] or [None],
+                    y=buf[ys_k] or [None],
+                    mode="lines" if _SHAPELY else "markers",
+                    fill="toself" if _SHAPELY else None,
+                    fillcolor=fill,
+                    line=dict(color=line, width=0.6),
+                    name=morph,
+                    showlegend=show_leg,
+                    legendgroup=morph,
+                    hoverinfo="skip",
+                    visible=True,
+                ))
+        return
+
+    # ── Modo continuo (lambda2, asymmetry, width) ────────────────────────────
+    colors = _assign_agent_colors(agent_step, color_by)
     buffers: dict[str, dict] = {}
     color_order = []
 
     for idx, row in agent_step.iterrows():
         color = colors.loc[idx]
-
         if color not in buffers:
-            buffers[color] = {
-                "lw_xs": [],
-                "lw_ys": [],
-                "rw_xs": [],
-                "rw_ys": [],
-            }
+            buffers[color] = {"lw_xs": [], "lw_ys": [], "rw_xs": [], "rw_ys": []}
             color_order.append(color)
-
-        x = float(row.get("pos_x", 0))
-        y = float(row.get("pos_y", 0))
+        x  = float(row.get("pos_x", 0))
+        y  = float(row.get("pos_y", 0))
         lw = float(row.get("lw", 5))
         rw = float(row.get("rw", 5))
         l2 = float(row.get("lambda2", params.get("lambda2_mean", 1.8)))
-
         buf = buffers[color]
-
         if _SHAPELY:
-            for side, bx_k, by_k in (
-                ("left", "lw_xs", "lw_ys"),
-                ("right", "rw_xs", "rw_ys"),
-            ):
-                coords = _flank_world_coords(
-                    x=x,
-                    y=y,
-                    lw=lw,
-                    rw=rw,
-                    lambda1=lambda1,
-                    lambda2=l2,
-                    alpha=alpha,
-                    delta=delta,
-                    wind_vec=wind_vec,
-                    side=side,
-                    scale=scale,
-                )
+            for side, bx_k, by_k in (("left","lw_xs","lw_ys"),("right","rw_xs","rw_ys")):
+                coords = _flank_world_coords(x=x, y=y, lw=lw, rw=rw,
+                    lambda1=lambda1, lambda2=l2, alpha=alpha, delta=delta,
+                    wind_vec=wind_vec, side=side, scale=scale)
                 if coords:
                     buf[bx_k].extend(coords[0] + [None])
                     buf[by_k].extend(coords[1] + [None])
@@ -809,46 +934,33 @@ def _render_colorby_mode(
             buf["rw_ys"].append(y)
 
     for color in color_order:
-        buf = buffers[color]
+        buf  = buffers[color]
         fill = _add_alpha_to_color(color, 0.72)
         line = _add_alpha_to_color(color, 0.95)
         label = _color_label(color, color_by)
-
         if _SHAPELY:
             for side_name, xs_k, ys_k, show_leg in (
-                ("lw", "lw_xs", "lw_ys", True),
-                ("rw", "rw_xs", "rw_ys", False),
+                ("lw","lw_xs","lw_ys",True), ("rw","rw_xs","rw_ys",False)
             ):
                 xs = buf[xs_k]
                 ys = buf[ys_k]
                 if xs:
                     fig.add_trace(go.Scatter(
-                        x=xs,
-                        y=ys,
-                        mode="lines",
-                        fill="toself",
-                        fillcolor=fill,
-                        line=dict(color=line, width=0.6),
-                        name=label,
-                        showlegend=show_leg,
-                        legendgroup=str(color),
-                        hoverinfo="skip",
+                        x=xs, y=ys, mode="lines", fill="toself",
+                        fillcolor=fill, line=dict(color=line, width=0.6),
+                        name=label, showlegend=show_leg,
+                        legendgroup=str(color), hoverinfo="skip",
                     ))
         else:
             for xs, ys, show_leg in (
-                (buf["lw_xs"], buf["lw_ys"], True),
-                (buf["rw_xs"], buf["rw_ys"], False),
+                (buf["lw_xs"],buf["lw_ys"],True),(buf["rw_xs"],buf["rw_ys"],False)
             ):
                 if xs:
                     fig.add_trace(go.Scatter(
-                        x=xs,
-                        y=ys,
-                        mode="markers",
+                        x=xs, y=ys, mode="markers",
                         marker=dict(size=8, color=fill),
-                        name=label,
-                        showlegend=show_leg,
-                        legendgroup=str(color),
-                        hoverinfo="skip",
+                        name=label, showlegend=show_leg,
+                        legendgroup=str(color), hoverinfo="skip",
                     ))
 
 
@@ -911,83 +1023,113 @@ def make_timeseries_figure(
     step_marker: int = None,
 ) -> go.Figure:
     """
-    Figura Plotly con N_dunes, calveos acumulados y asimetría media.
+    Figura Plotly con 4 paneles:
+      1. N dunas activas
+      2. Eventos por paso (calveos, fusiones, intercambios, fragmentaciones)
+      3. Acumulados por tipo de colision
+      4. Asimetria media
     """
     fig = make_subplots(
-        rows=3,
+        rows=4,
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.06,
-        subplot_titles=[
-            "N dunas activas",
-            "Calveos acumulados",
-            "Asimetría media",
-        ],
+        vertical_spacing=0.03,
+        row_heights=[0.20, 0.27, 0.27, 0.20],
+        subplot_titles=["N dunas", "Eventos/paso", "Acumulados", "Asimetria"],
     )
 
     if model_df.empty:
         fig.add_annotation(
             text="Sin datos",
-            x=0.5,
-            y=0.5,
-            xref="paper",
-            yref="paper",
+            x=0.5, y=0.5,
+            xref="paper", yref="paper",
             showarrow=False,
             font=dict(color=C["muted"]),
         )
-        fig.update_layout(**PLOTLY_LAYOUT, height=320)
+        fig.update_layout(**PLOTLY_LAYOUT, height=480)
         return fig
 
-    series = [
-        ("N_dunes",        C["accent"], 1),
-        ("n_dunes",        C["accent"], 1),
-        ("calving_count",  C["warn"],   2),
-        ("mean_asymmetry", "#38A169",   3),
-        ("mean_asymmetry_final", "#38A169", 3),
+    df = model_df.copy()
+    x = df["step"] if "step" in df.columns else df.index
+
+    def _add(col_candidates, row, color, name, dash="solid"):
+        for col in col_candidates:
+            if col in df.columns:
+                fig.add_trace(go.Scatter(
+                    x=x, y=df[col],
+                    name=name,
+                    line=dict(color=color, width=1.5, dash=dash),
+                    showlegend=(row in (2, 3)),
+                    legendgroup=name,
+                ), row=row, col=1)
+                return True
+        return False
+
+    # Panel 1: N dunas
+    _add(["N_dunes", "n_dunes"], 1, C["accent"], "N dunas")
+
+    # Panel 2: eventos por paso
+    EVENT_COLS = [
+        (["calvings_this_step",      "calving_this_step"],   "#E53E3E", "Calveos/paso"),
+        (["merging_this_step",       "merge_this_step"],     "#DD6B20", "Fusiones/paso"),
+        (["exchange_this_step",      "exch_this_step"],      "#38A169", "Intercambios/paso"),
+        (["fragmentation_this_step", "frag_this_step"],      "#805AD5", "Fragmentaciones/paso"),
+        (["collisions_this_step",    "collision_this_step"], "#718096", "Colisiones/paso"),
     ]
+    any_event = False
+    for candidates, color, label in EVENT_COLS:
+        ok = _add(candidates, 2, color, label)
+        any_event = any_event or ok
+    if not any_event:
+        _add(["calving_count"], 2, "#E53E3E", "Calveos acum.", dash="dot")
 
-    used_rows = set()
+    # Panel 3: acumulados por tipo
+    ACCUM_COLS = [
+        (["calving_count"],       "#E53E3E", "Calveos"),
+        (["merging_count"],       "#DD6B20", "Fusiones"),
+        (["exchange_count"],      "#38A169", "Intercambios"),
+        (["fragmentation_count"], "#805AD5", "Fragmentaciones"),
+    ]
+    for candidates, color, label in ACCUM_COLS:
+        _add(candidates, 3, color, label)
 
-    for col, color, row in series:
-        if row in used_rows:
-            continue
-        if col not in model_df.columns:
-            continue
+    # Panel 4: asimetria media
+    _add(["mean_asymmetry", "mean_asymmetry_final"], 4, "#2B6CB0", "Asimetria")
 
-        fig.add_trace(
-            go.Scatter(
-                x=model_df.index,
-                y=model_df[col],
-                line=dict(color=color, width=1.6),
-                showlegend=False,
-            ),
-            row=row,
-            col=1,
-        )
-        used_rows.add(row)
-
-        if step_marker is not None:
+    # Marcador de paso actual
+    if step_marker is not None:
+        for row in range(1, 5):
             fig.add_vline(
                 x=step_marker,
-                line=dict(color=C["border"], width=1.5, dash="dot"),
-                row=row,
-                col=1,
+                line=dict(color=C["border"], width=1.2, dash="dot"),
+                row=row, col=1,
             )
 
-    fig.update_layout(**PLOTLY_LAYOUT, height=320)
+    fig.update_layout(
+        **PLOTLY_LAYOUT,
+        height=420,
+        margin=dict(l=40, r=10, t=30, b=30),
+        legend=dict(
+            font=dict(size=8),
+            bgcolor="rgba(255,255,255,0.85)",
+            bordercolor=C["border"],
+            borderwidth=1,
+            x=0.01, y=0.98,
+            xanchor="left", yanchor="top",
+            tracegroupgap=2,
+        ),
+    )
     fig.update_xaxes(
-        showgrid=True,
-        gridcolor=C["border"],
-        gridwidth=0.5,
-        title_text="Paso",
-        row=3,
-        col=1,
+        showgrid=True, gridcolor=C["border"], gridwidth=0.5,
+        title_text="Paso", row=4, col=1,
     )
     fig.update_yaxes(
-        showgrid=True,
-        gridcolor=C["border"],
-        gridwidth=0.5,
+        showgrid=True, gridcolor=C["border"], gridwidth=0.5,
+        tickfont=dict(size=9),
     )
+    # Reducir tamaño de titulos de subplots
+    for ann in fig.layout.annotations:
+        ann.font.size = 9
 
     return fig
 
@@ -1205,11 +1347,26 @@ def make_parallel_figure(
             range=[vmin, vmax],
         )
 
+    # outflux_mode es categórico — lo codificamos numéricamente
+    if "outflux_mode" in summary.columns:
+        mode_map = {"Hersen": 0, "Duran": 1}
+        mode_vals = summary["outflux_mode"].map(mode_map).fillna(-1)
+        outflux_dim = dict(
+            label="Outflux",
+            values=mode_vals,
+            range=[-0.5, 1.5],
+            tickvals=[0, 1],
+            ticktext=["Hersen", "Duran"],
+        )
+    else:
+        outflux_dim = None
+
     dims = [
         _dim("q_sat",        "qsat"),
         _dim("q₀/q_sat",     "q0ratio"),
         _dim("q_shift",      "qshift_ratio"),
         _dim("λ₂ σ",         "lambda2_std"),
+        outflux_dim,
         _dim("N final",      "n_dunes_final"),
         _dim("Ancho medio",  "mean_width_final"),
         _dim("Asimetría",    "mean_asymmetry_final"),

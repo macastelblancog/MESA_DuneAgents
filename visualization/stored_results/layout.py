@@ -18,7 +18,7 @@ import pandas as pd
 from dash import dcc, html, Input, Output, State, no_update
 
 from visualization.shared.callbacks import (
-    load_summary, load_run, get_steps, agents_at_step,
+    load_summary, load_run, load_run_cached, get_steps, agents_at_step,
     make_field_figure, make_timeseries_figure,
     make_histogram_figure, make_heatmap_figure, make_parallel_figure,
     METRIC_LABELS, PARAM_LABELS, ALL_REGIMES, C,
@@ -109,6 +109,13 @@ def layout(data_dir: Path) -> html.Div:
     )
     seed_opts = [{"label": f"seed {s}", "value": s} for s in seeds]
 
+    # Modos de outflux presentes en los datos
+    outflux_modes = (
+        sorted(summary["outflux_mode"].dropna().unique().tolist())
+        if not summary.empty and "outflux_mode" in summary.columns
+        else ["Hersen", "Duran"]
+    )
+
     # Rangos dinámicos — se leen del summary para adaptarse a cualquier grid
     qsat_lo,  qsat_hi  = _col_range(summary, "qsat",         (30.0, 100.0))
     q0_lo,    q0_hi    = _col_range(summary, "q0ratio",       (0.10,  0.50))
@@ -197,6 +204,17 @@ def layout(data_dir: Path) -> html.Div:
                                     "marginBottom": 3},
                     ),
 
+                    # Modo outflux
+                    html.Span("Modo outflux", style=CTRL),
+                    dcc.Checklist(
+                        id="sr-outflux-modes",
+                        options=[{"label": f" {m}", "value": m}
+                                 for m in outflux_modes],
+                        value=outflux_modes,
+                        labelStyle={"display": "block", "fontSize": 12,
+                                    "marginBottom": 3},
+                    ),
+
                     # q_sat
                     html.Span("q_sat (m²/año)", style=CTRL),
                     _range_slider(
@@ -251,6 +269,21 @@ def layout(data_dir: Path) -> html.Div:
                         placeholder="Todas las semillas",
                         clearable=True,
                         style=DD,
+                    ),
+
+                    # Tipo de evento (calveo)
+                    html.Span("Tipo de evento dominante", style=CTRL),
+                    dcc.Checklist(
+                        id="sr-event-filter",
+                        options=[
+                            {"label": " Calveos",         "value": "calving"},
+                            {"label": " Fusiones",        "value": "merging"},
+                            {"label": " Intercambios",    "value": "exchange"},
+                            {"label": " Fragmentaciones", "value": "fragmentation"},
+                        ],
+                        value=["calving", "merging", "exchange", "fragmentation"],
+                        labelStyle={"display": "block", "fontSize": 12,
+                                    "marginBottom": 3},
                     ),
 
                     # ── Separador ─────────────────────────────────────────────
@@ -359,11 +392,25 @@ def layout(data_dir: Path) -> html.Div:
                                              "marginRight": 6}),
                             dcc.Input(
                                 id="sr-speed", type="number",
-                                value=1, min=1, max=50, step=1,
+                                value=1, min=1, max=500, step=1,
                                 style={"width": 52, "fontSize": 11,
                                        "padding": "2px 6px",
                                        "border": f"1px solid {C['border']}",
                                        "borderRadius": 4, "marginRight": 10},
+                            ),
+                            html.Span("Intervalo (ms):",
+                                      style={"fontSize": 10, "color": C["muted"],
+                                             "marginRight": 4}),
+                            dcc.Dropdown(
+                                id="sr-interval-ms",
+                                options=[
+                                    {"label": "100ms", "value": 100},
+                                    {"label": "250ms", "value": 250},
+                                    {"label": "400ms", "value": 400},
+                                    {"label": "800ms", "value": 800},
+                                ],
+                                value=400, clearable=False,
+                                style={"width": 90, "fontSize": 11, "marginRight": 10},
                             ),
                             html.Span(id="sr-play-status", children="",
                                       style={"fontSize": 10, "color": C["muted"]}),
@@ -401,10 +448,10 @@ def layout(data_dir: Path) -> html.Div:
                     html.Div([
                         dcc.Graph(id="sr-timeseries",
                                   config={"displayModeBar": False},
-                                  style={"height": 240}),
+                                  style={"height": 420}),
                     ], style={**CARD, "flex": 2, "marginBottom": 0,
                                "marginLeft": 10}),
-                ], style={"display": "flex"}),
+                ], style={"display": "flex", "alignItems": "flex-start"}),
 
             ], style={
                 "flex": 1, "padding": 10,
@@ -433,6 +480,7 @@ def _apply_filters(
     qshift_range: list,
     l2std_range: list,
     seeds: list,
+    outflux_modes: list = None,
 ) -> pd.DataFrame:
     """
     Aplica todos los filtros del panel al summary.
@@ -446,6 +494,9 @@ def _apply_filters(
 
     if regimes and "wind_regime" in summary.columns:
         mask &= summary["wind_regime"].isin(regimes)
+
+    if outflux_modes and "outflux_mode" in summary.columns:
+        mask &= summary["outflux_mode"].isin(outflux_modes)
 
     if qsat_range and "qsat" in summary.columns:
         lo, hi = qsat_range
@@ -469,6 +520,37 @@ def _apply_filters(
     return summary[mask]
 
 
+def _apply_event_filter(
+    summary: pd.DataFrame,
+    event_types: list,
+) -> pd.DataFrame:
+    """
+    Filtra corridas según qué tipo de evento fue dominante.
+    Una corrida pasa si al menos uno de sus contadores seleccionados > 0,
+    o si no existen las columnas (no filtra en ese caso).
+
+    event_types: subconjunto de ["calving","merging","exchange","fragmentation"]
+    """
+    if summary.empty or not event_types:
+        return summary
+
+    col_map = {
+        "calving":       "calving_count",
+        "merging":       "merging_count",
+        "exchange":      "exchange_count",
+        "fragmentation": "fragmentation_count",
+    }
+
+    available = [col_map[e] for e in event_types if col_map[e] in summary.columns]
+    if not available:
+        return summary  # columnas no existen — no filtrar
+
+    mask = pd.Series(False, index=summary.index)
+    for col in available:
+        mask |= (summary[col].fillna(0) > 0)
+    return summary[mask]
+
+
 # ── Callbacks ─────────────────────────────────────────────────────────────────
 
 def register_callbacks(app):
@@ -483,27 +565,33 @@ def register_callbacks(app):
         Input("sr-metric",         "value"),
         Input("sr-color-metric",   "value"),
         Input("sr-regimes",        "value"),
+        Input("sr-outflux-modes",  "value"),
         Input("sr-qsat-range",     "value"),
         Input("sr-q0ratio-range",  "value"),
         Input("sr-qshift-range",   "value"),
         Input("sr-l2std",          "value"),
         Input("sr-seed-filter",    "value"),
+        Input("sr-event-filter",   "value"),
         Input("sr-reload",         "n_clicks"),
         State("sr-data-dir",       "data"),
     )
     def cb_exploration(x_p, y_p, metric, color_m,
-                       regimes, qsat_r, q0_r, qsh_r, l2_r, seeds,
-                       _reload, ddir):
+                       regimes, outflux_m, qsat_r, q0_r, qsh_r, l2_r, seeds,
+                       event_types, _reload, ddir):
         summary = load_summary(Path(ddir))
         filtered = _apply_filters(
             summary,
             regimes=regimes or ALL_REGIMES,
+            outflux_modes=outflux_m,
             qsat_range=qsat_r,
             q0ratio_range=q0_r,
             qshift_range=qsh_r,
             l2std_range=l2_r,
             seeds=seeds or [],
         )
+        # Filtro por tipo de evento dominante
+        event_types = event_types or ["calving","merging","exchange","fragmentation"]
+        filtered = _apply_event_filter(filtered, event_types)
         n = len(filtered)
         return (
             make_heatmap_figure(filtered, x_p, y_p, metric),
@@ -521,6 +609,7 @@ def register_callbacks(app):
         State("sr-x-param",             "value"),
         State("sr-y-param",             "value"),
         State("sr-regimes",             "value"),
+        State("sr-outflux-modes",       "value"),
         State("sr-qsat-range",          "value"),
         State("sr-q0ratio-range",       "value"),
         State("sr-qshift-range",        "value"),
@@ -529,7 +618,7 @@ def register_callbacks(app):
         State("sr-data-dir",            "data"),
     )
     def cb_populate_selector(click_data, x_p, y_p,
-                              regimes, qsat_r, q0_r, qsh_r, l2_r, seeds,
+                              regimes, outflux_m, qsat_r, q0_r, qsh_r, l2_r, seeds,
                               ddir):
         HIDDEN_SEL = {"display": "none"}
         SHOWN_SEL  = {}
@@ -551,6 +640,7 @@ def register_callbacks(app):
         filtered = _apply_filters(
             summary,
             regimes=regimes or ALL_REGIMES,
+            outflux_modes=outflux_m,
             qsat_range=qsat_r,
             q0ratio_range=q0_r,
             qshift_range=qsh_r,
@@ -572,15 +662,22 @@ def register_callbacks(app):
 
         options = []
         for _, row in matching.iterrows():
-            run_id = str(row.get("run_id", ""))
-            regime = row.get("wind_regime", "?")
-            qsat   = row.get("qsat", "?")
-            q0     = row.get("q0ratio", "?")
-            l2std  = row.get("lambda2_std", "?")
-            seed   = row.get("seed", "?")
-            label  = (
-                f"{run_id}  ·  {regime}  ·  "
-                f"qsat={qsat}  q0={q0}  λ₂σ={l2std}  seed={seed}"
+            run_id  = str(row.get("run_id", ""))
+            regime  = row.get("wind_regime", "?")
+            outflux = row.get("outflux_mode", "?")
+            qsat    = row.get("qsat", "?")
+            q0      = row.get("q0ratio", "?")
+            qsh     = row.get("qshift_ratio", "?")
+            l2std   = row.get("lambda2_std", "?")
+            seed    = row.get("seed", "?")
+            # Formatear numéricos
+            def _fmt(v):
+                try: return f"{float(v):.3g}"
+                except: return str(v)
+            label = (
+                f"{run_id}  ·  {regime} / {outflux}  ·  "
+                f"qsat={_fmt(qsat)}  q0={_fmt(q0)}  qsh={_fmt(qsh)}"
+                f"  λ₂σ={_fmt(l2std)}  seed={seed}"
             )
             options.append({"label": label, "value": run_id})
 
@@ -623,12 +720,14 @@ def register_callbacks(app):
 
         param_keys = [
             ("wind_regime",  "Régimen"),
+            ("outflux_mode", "Outflux"),
             ("qsat",         "q_sat (m²/año)"),
             ("q0ratio",      "q₀ / q_sat"),
             ("qshift_ratio", "q_shift / q_sat"),
             ("lambda2_mean", "λ₂ media"),
             ("lambda2_std",  "λ₂ σ"),
             ("lambda1",      "λ₁"),
+            ("lambda3",      "λ₃"),
             ("alpha",        "α"),
             ("delta",        "Δ (m)"),
             ("c",            "c"),
@@ -694,6 +793,15 @@ def register_callbacks(app):
             return True, "▶ Play", "Fin — mueve el slider para retroceder"
         return False, "⏸ Pausa", "reproduciendo..."
 
+    # ── Control dinámico de intervalo (ms/tick) ──────────────────────────────
+    @app.callback(
+        Output("sr-interval", "interval"),
+        Input("sr-interval-ms", "value"),
+        prevent_initial_call=True,
+    )
+    def cb_set_interval(ms):
+        return int(ms or 400)
+
     @app.callback(
         Output("sr-step-slider", "value",    allow_duplicate=True),
         Output("sr-interval",    "disabled", allow_duplicate=True),
@@ -737,7 +845,8 @@ def register_callbacks(app):
             return empty_field, empty_hist, empty_ts
 
         try:
-            run_data   = load_run(Path(ddir), run_id)
+            # load_run_cached evita releer SQLite en cada tick del slider
+            run_data   = load_run_cached(Path(ddir), run_id)
             agent_step = agents_at_step(run_data["agents"], step)
             model_df   = run_data["model"]
             params     = run_data["params"] or params_store or {}

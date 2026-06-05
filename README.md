@@ -87,4 +87,5 @@ global uniforme de Robson & Baas. Esto permite explorar:
 - Segregación espacial por λ₂ bajo viento bimodal
 - Tiempo de relajación del campo tras cambio de régimen de viento
 
-Referencia: doc2_definitivo.md §9.1
+
+ python -m pytest tests/ -v > ./tests/testresults.txt

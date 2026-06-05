@@ -389,7 +389,18 @@ class DuneSwarm(mesa.Model):
 
         Tasa de inyección (Ec. 8 paper 2024):
             N_enter = ρ₀ · v_mig(W_eq) · fieldwidth · dt
+
+        C-04: sin flujo ambiental no hay inyección física posible,
+        independientemente del inject_mode.
         """
+        # C-04: q0ratio=0 → sin flujo ambiental → no inyectar
+        if self.q0ratio <= 0.0:
+            return
+
+        # C-04b: flujo neto insuficiente → no existe W_eq físico → no inyectar
+        if self.q0 <= self.alpha * self.qsat:
+            return
+
         wx, wy = self._wind_vec
 
         # Calcular ancho de inyección según modo
@@ -525,3 +536,24 @@ class DuneSwarm(mesa.Model):
         return (f"DuneSwarm(step={self.current_step}, "
                 f"N={len(list(self.agents))}, "
                 f"outflux={self.outflux_mode})")
+    
+    
+    def get_params(self) -> dict:
+        return {
+            "simwidth":        self.simwidth,
+            "simlength":       self.simlength,
+            "qsat":            self.qsat,
+            "q0ratio":         self.q0ratio,
+            "qshift_ratio":    self.qshift_ratio,
+            "dt":              self.dt,
+            "lambda1":         self.lambda1,
+            "lambda2_mean":    self.lambda2_mean,
+            "lambda2_std":     self.lambda2_std,
+            "lambda3":         self.lambda3,
+            "alpha":           self.alpha,
+            "delta":           self.delta,
+            "c":               self.c,
+            "w0":              self.w0,
+            "wind_regime":     self._wind_regime.regime,
+            "outflux_mode":    self.outflux_mode,
+        }

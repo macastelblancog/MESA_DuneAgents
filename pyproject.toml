@@ -17,6 +17,9 @@ dependencies = [
     "shapely>=2.1.2",
     "pyarrow>=24.0.0",
     "pandas>=2.0",
+    "pytest==9.0.3",
+    "ipykernel",
+    "kaleido"
 ]
 
 [project.optional-dependencies]
